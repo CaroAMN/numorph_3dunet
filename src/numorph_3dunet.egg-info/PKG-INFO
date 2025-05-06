@@ -1,3 +1,17 @@
+Metadata-Version: 2.1
+Name: numorph-3dunet
+Version: 0.1.0
+Summary: Numorph segmentation of cell nuclei using a 3dunet.
+Home-page: https://github.com/CaroAMN/numorph_3dunet
+Author: Carolin Schwitalla
+Author-email: carolin.schwitalla@uni-tuebingen.de
+License: MIT
+Keywords: 3dunet,segmentation,microscopy,lightsheet
+Platform: UNKNOWN
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
 # NuMorph 3DUnet
 
 The package performs cell nuclei segmentation on large light-sheet imaging dataset. The models that the package uses can be found [here](https://bitbucket.org/steinlabunc/numorph/downloads/) for download. 
@@ -17,16 +31,12 @@ Required arguments:
 - `-o`: Output directory (will be created if it doesn't exist)
 - `--n_channels`: Number of channels
 - `--sample_name`: Sample name for output files
-- `--model`: Model file (.h5)
 
 Optional arguments:
-- `-g`: GPU tag (default: 0)
 - `--pred_threshold`: Prediction threshold (default: 0.5)
 - `--int_threshold`: Minimum intensity threshold (default: 200)
-- `--overlap`: Overlap between chunks [x y z] (default: 16 16 8)
-
-See full help with `numorph_3dunet.predict --help`
-
+- `--overlap`: Overlap between chunks [x y z] (default: 16 16 8) 
+- See full help with `numorph_3dunet.predict --help`
 
 # Credits
 
@@ -36,3 +46,4 @@ The pip package was originally developed by Carolin Schwitalla and contains the 
 > Krupa O, Fragola G, Hadden-Ford E, Mory JT, Liu T, Humphrey Z, Rees BW, Krishnamurthy A, Snider WD, Zylka MJ, Wu G, Xing L, Stein JL.
 >
 > Cell Rep. 2021 Oct 12, doi: [10.1016/j.celrep.2021.109802](https://doi.org/10.1016%2Fj.celrep.2021.109802)
+
