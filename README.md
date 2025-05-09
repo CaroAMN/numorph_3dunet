@@ -4,12 +4,27 @@ The package performs cell nuclei segmentation on large light-sheet imaging datas
 
 This package containes the original 3DUnet used in the NuMorph pipeline. A detailed describtion of the architecture and training procedure can be found in the [publication](https://doi.org/10.1016/j.celrep.2021.109802).
 
+# Installation
+Clone the repository to your workstation.
+The `numorphunet.yml` defines the nescessary dependencies for running the prediction. You need to have `conda` installed to create the environment with the following command: 
+```
+conda env create -f numorphunet.yml
+```
+Activate the environment with: 
+```
+conda activate 3dunet
+```
+Install the numorph 3DUnet in the `3dunet`conda env by using the follwoing command in the directory of the `pyproject.toml` file :
+```
+pip install .
+```
+
 # Usage
 
 Once installed, you can run the cell segmentation tool using the command:
 
 ```
-numorph_3dunet.predict -i /path/to/input/directory -o /path/to/output/directory --n_channels 1 --sample_name TEST1
+numorph_3dunet.predict -i /path/to/input/directory -o /path/to/output/directory --n_channels 1 --sample_name TEST1 --model /path/to/model_file.h5
 ```
 
 Required arguments:
