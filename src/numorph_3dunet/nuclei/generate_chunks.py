@@ -4,36 +4,43 @@ import numpy as np
 import cc3d
 import argparse
 import mat73
+import csv
+import pandas as pd 
 
 from datetime import datetime
 from scipy.io import loadmat
 from scipy import ndimage
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
+from operator import contains
 
 from numorph_3dunet.unet3d.training import load_old_model
 from numorph_3dunet.nuclei.img_utils import calculate_rescaling_intensities, measure_colocalization, remove_touching_df
+from numorph_3dunet.nuclei.read_params import read_params_from_csv
 
 # Move the main functionality into a function that can be imported
 def main():
     # Parse CLI arguments
-    parser = argparse.ArgumentParser(description='Predict from validation dataset.')
+    parser = argparse.ArgumentParser(description='Predict cell nuclei')
 
-    #Mendatory arguments
+    # parameters from csv file 
+    parser.add_argument('-p', default='', metavar='p', type=str, nargs='?', 
+                        help='Path to csv file with parameters.')
+
+    #params when using without param file 
     parser.add_argument('-i', required=True, metavar='i', type=str, nargs='?',
                         help='Input image directory')
     parser.add_argument('-o', required=True, metavar='i', type=str, nargs='?',
                         help='Output image directory')
-    parser.add_argument('--n_channels', required=True ,metavar='n_channels', type=int, nargs='?',
+    parser.add_argument('--n_channels', required=False ,metavar='n_channels', type=int, nargs='?',
                         help='Number of channels')
-    parser.add_argument('--sample_name', required=True ,metavar='save_name', type=str, nargs='?',
-                        help='sample_name')
-    parser.add_argument('--model', required=True ,metavar='model', type=str, nargs='?',
+    parser.add_argument('--sample_id', required=False ,metavar='save_name', type=str, nargs='?',
+                        help='sample_id')
+    parser.add_argument('--model_file', required=False ,metavar='model', type=str, nargs='?',
                         help='Model file')
-
-    parser.add_argument('-g', default=0, metavar='g', type=int, nargs='?',
+    parser.add_argument('-gpu', default=0, metavar='g', type=int, nargs='?',
                         help='GPU tag')
-    parser.add_argument('--overlap', default=[16, 16, 8] ,metavar='overlap', type=int, nargs=3,
+    parser.add_argument('--chunk_overlap', default=[16, 16, 8] ,metavar='chunk_overlap', type=int, nargs=3,
                         help='Overlap between chunks in voxels. Default is 16, 16, 8')
     parser.add_argument('--pred_threshold', default=0.5 ,metavar='pred_threshold', type=float, nargs='?',
                         help='Prediction threshold. Default is 0.5')
@@ -55,41 +62,42 @@ def main():
                         help='Measure intensity of co-localizaed channels. Default is false')
     parser.add_argument('--resample_resolution', default=25, metavar='resample_resolution', type=float, nargs=3,
                         help='Resolution of resampled images')
+    parser.add_argument('--trained_img_resolution', default=[0.75, 0.75, 2.5], metavar='trained_img_resolution', type=float, nargs=3,
+                        help='Resolution of images the model was trained on')
+    parser.add_argument('--chunk_size', default=[112, 112, 32], metavar='chunk_size', type=int, nargs=3,
+                        help='Chunk size in voxels. Default is 112, 112, 32')
 
 
     args = parser.parse_args()
+    if args.p and os.path.exists(args.p):
+        try: 
+            params_dict = read_params_from_csv(args.p)
+            for key, value in params_dict.items():
+                if hasattr(args, key):
+                    setattr(args, key, value)
+        except Exception as e:
+            print(f"Error reading parameters from CSV: {e}")
+            return
+    
 
-    if args.g:
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.g)
+    
+
+    if args.gpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(int(args.gpu))
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
     #initialize variables with args values
     input_img_directory = args.i  # Input image directory
-    print(input_img_directory)
     output_directory = args.o  # Output image directory
-    model_file = args.model  # Model file
-    chunk_size = [112, 112, 32]  # Model specific chunk size in voxels
-    overlap = args.overlap  # Overlap between chunks in voxels
-    pred_threshold = args.pred_threshold  # Prediction threshold. Default is 0.5
-    int_threshold = args.int_threshold  # Minimum intensity of positive cells. Otherwise set to None
-    normalize_intensity = args.normalize_intensity  # Whether to normalize intensities using min/max. Recommended: true
-    resample_chunks = args.resample_chunks  # Whether to resample image to match trained image resolution. Note: increases computation time
-    tree_radius = args.tree_radius     # Pixel radius for removing centroids near each other
-    acquired_img_resolution = args.acquired_img_resolution  # Resolution of acquired images /todo
-    trained_img_resolution = [0.75, 0.75, 2.5]  # Resolution of images the default model was trained on
-    measure_coloc = args.measure_coloc # Measure intensity of co-localizaed channels
-    n_channels = args.n_channels  # Total number of channels
-    img_list = []   # Empty image list
-    save_name = args.sample_name
-    use_mask = args.use_mask
-    mask_file = args.mask_file
-    resample_resolution=args.resample_resolution
+    img_list = []  # List of images
+    
+    print(args)
 
 
     ################################
     ## Extra options for running model on GPU with limited memory
-    if args.g:
+    if args.gpu:
         import tensorflow as tf
         from keras import backend as k
     
@@ -112,7 +120,7 @@ def main():
         os.makedirs(output_directory)
         print(f"Created output directory: {output_directory}")
 
-    save_name = os.path.join(output_directory, save_name + ".csv")
+    save_name = os.path.join(output_directory, args.sample_id + ".csv")
     print('Saving results to: ', save_name)
 
 
@@ -120,31 +128,31 @@ def main():
     # Load model
     # TODO: delete hard coded file path after debugging
     #model_file = "/home/schwitalla/Documents/numorph_3dunet/src/numorph_3dunet/models/075_121_model.h5"
-    model = load_old_model(model_file)
-
+    model = load_old_model(args.model_file)
+    print(args)
     # Load mask
-    if use_mask:
+    if args.use_mask:
         print('Loading mask...')
-        mask = mat73.loadmat(mask_file)
+        mask = mat73.loadmat(args.mask_file)
         mask = mask['I_mask']
     else:
         mask = np.ones((1, 1, 1))
 
-    mask_resolution = np.repeat(resample_resolution, 3)
+    mask_resolution = np.repeat(args.resample_resolution, 3)
     print('Mask resolution: ', mask_resolution)
 
     # Determine chunk sizes while considering scaling and chunk overlap
-    res = [i / j for i, j in zip(acquired_img_resolution, trained_img_resolution)]
-    mask_res = [i / j for i, j in zip(acquired_img_resolution, mask_resolution)]
+    res = [i / j for i, j in zip(args.acquired_img_resolution, args.trained_img_resolution)]
+    mask_res = [i / j for i, j in zip(args.acquired_img_resolution, mask_resolution)]
 
-    load_chunk_size = [round(i / j) for i, j in zip(chunk_size, res)]
+    load_chunk_size = [round(i / j) for i, j in zip(args.chunk_size, res)]
 
     # Taking only channel 1 images (assumed to be cell nuclei)
     files = os.listdir(input_img_directory)
     #print('Files: ', files)
 
     # Take img_list for each channel. Nuclei is channel should be first
-    if not measure_coloc:
+    if not args.measure_coloc:
         n_channels = 1
 
     if not img_list:
@@ -167,8 +175,8 @@ def main():
     # chunk_end = chunk_start[1:] + overlap[2]
     # chunk_end = np.append(chunk_end, total_images - 1)
 
-    chunk_start = np.arange(0, total_slices, step=(chunk_size[2] - overlap[2]))
-    chunk_end = chunk_start + chunk_size[2]
+    chunk_start = np.arange(0, total_slices, step=(args.chunk_size[2] - args.chunk_overlap[2]))
+    chunk_end = chunk_start + args.chunk_size[2]
     n_chunks = len(chunk_start)
 
     #print('mask shape [0]: ', mask.shape[0])
@@ -178,15 +186,15 @@ def main():
     mask_res[-1] = 1
 
     # Calculate rescaling intensity values
-    if normalize_intensity:
+    if args.normalize_intensity:
         intensity_values = calculate_rescaling_intensities(img_list[0], sampling_range=10)
-        if int_threshold is not None:
-            int_threshold = rescale_intensity(np.asarray(int_threshold, dtype=np.float32),
+        if args.int_threshold is not None:
+            int_threshold = rescale_intensity(np.asarray(args.int_threshold, dtype=np.float32),
                                             in_range=intensity_values)
 
     # Calculate rescaling factor if resolutions are different
-    if acquired_img_resolution != trained_img_resolution and resample_chunks:
-        rescale_factor = [i / j for i, j in zip(acquired_img_resolution, trained_img_resolution)]
+    if args.acquired_img_resolution != args.trained_img_resolution and args.resample_chunks:
+        rescale_factor = [i / j for i, j in zip(args.acquired_img_resolution, args.trained_img_resolution)]
     else:
         rescale_factor = None
 
@@ -229,12 +237,12 @@ def main():
         # If last chunk, then pad bottom to make it fit into the model
         if add_end_padding:
             print('Padding Chunk End...')
-            end_pad = chunk_size[2] - images.shape[2]
+            end_pad = args.chunk_size[2] - images.shape[2]
             mask_chunk = np.pad(mask_chunk, ((0, 0), (0, 0), (0, end_pad)), 'constant')
             images = np.pad(images, ((0, 0), (0, 0), (0, end_pad)), 'mean')
 
         # Rescale intensity
-        if normalize_intensity:
+        if args.normalize_intensity:
             print('Rescaling Intensity...')
             images_rescaled = rescale_intensity(images, in_range=intensity_values)
         else:
@@ -248,8 +256,8 @@ def main():
         [rows, cols, slices] = images_rescaled.shape
 
         # Calculate y and x positions to sample image chunks
-        x_positions = np.arange(0, cols, step=(chunk_size[0] - overlap[0]))
-        y_positions = np.arange(0, rows, step=(chunk_size[1] - overlap[1]))
+        x_positions = np.arange(0, cols, step=(args.chunk_size[0] - args.chunk_overlap[0]))
+        y_positions = np.arange(0, rows, step=(args.chunk_size[1] - args.chunk_overlap[1]))
         #print('x_positions: ', x_positions)
         #print('y_positions: ', y_positions)
 
@@ -264,10 +272,10 @@ def main():
         msk_chunks = []
         for i in range(n_chunks_r):
             for j in range(n_chunks_c):
-                msk_chunk = mask_chunk[y_positions[i]:y_positions[i] + chunk_size[0],
-                            x_positions[j]:x_positions[j] + chunk_size[1], :]
-                img_chunk = images_rescaled[y_positions[i]:y_positions[i] + chunk_size[0],
-                            x_positions[j]:x_positions[j] + chunk_size[1], :]
+                msk_chunk = mask_chunk[y_positions[i]:y_positions[i] + args.chunk_size[0],
+                            x_positions[j]:x_positions[j] + args.chunk_size[1], :]
+                img_chunk = images_rescaled[y_positions[i]:y_positions[i] + args.chunk_size[0],
+                            x_positions[j]:x_positions[j] + args.chunk_size[1], :]
 
                 if img_chunk.shape != tuple(load_chunk_size):
                     # If current chunk is larger than target, we need to crop instead of pad
@@ -303,7 +311,7 @@ def main():
         # model for training.
         startTime = datetime.now()
         output = []
-        img_shape = (1, 1) + tuple(chunk_size)
+        img_shape = (1, 1) + tuple(args.chunk_size)
         empty_chunk = np.zeros(img_shape)
         empty_idx = np.zeros(len(img_chunks))
         img_reshaped = []
@@ -333,7 +341,7 @@ def main():
             for j in range(n_chunks_c):
                 if empty_idx[a] != 1:
                     # Calculate final prediction mask
-                    output_thresh = np.where(output[a] > pred_threshold, 1, 0)
+                    output_thresh = np.where(output[a] > args.pred_threshold, 1, 0)
 
                     # Label connected components
                     labels_out = cc3d.connected_components(output_thresh)
@@ -353,14 +361,14 @@ def main():
 
                     if centroids.any():
                         # Remove centroids along borders
-                        centroids = centroids[centroids[:, 0] > overlap[0] / 2]
-                        centroids = centroids[centroids[:, 0] <= chunk_size[0] - overlap[0] / 2]
+                        centroids = centroids[centroids[:, 0] > args.chunk_overlap[0] / 2]
+                        centroids = centroids[centroids[:, 0] <= args.chunk_size[0] - args.chunk_overlap[0] / 2]
 
-                        centroids = centroids[centroids[:, 1] > overlap[1] / 2]
-                        centroids = centroids[centroids[:, 1] <= chunk_size[1] - overlap[1] / 2]
+                        centroids = centroids[centroids[:, 1] > args.chunk_overlap[1] / 2]
+                        centroids = centroids[centroids[:, 1] <= args.chunk_size[1] - args.chunk_overlap[1] / 2]
 
-                        centroids = centroids[centroids[:, 2] > overlap[2] / 2]
-                        centroids = centroids[centroids[:, 2] <= chunk_size[2] - overlap[2] / 2]
+                        centroids = centroids[centroids[:, 2] > args.chunk_overlap[2] / 2]
+                        centroids = centroids[centroids[:, 2] <= args.chunk_size[2] - args.chunk_overlap[2] / 2]
 
                         # Adjust centroid positions
                         centroids[:, 0] += y_positions[i]
@@ -389,7 +397,7 @@ def main():
             continue
 
         # Get mask structure id's
-        if use_mask:
+        if args.use_mask:
             structure_idx = [mask[tuple(np.floor(c * mask_res).astype(int))] for c in cent]
         else:
             structure_idx = np.ones(cent.shape[0])
@@ -406,14 +414,14 @@ def main():
             continue
 
         # Remove touching cells
-        cent_rm = remove_touching_df(cent, radius=tree_radius)
+        cent_rm = remove_touching_df(cent, radius=args.tree_radius)
         ncent_rm = cent.shape[0] - cent_rm.shape[0]
         total_cells += -ncent_rm
         print('Removed ' + str(ncent_rm) + ' touching nuclei')
         cent = cent_rm
 
         # Measure intensities in other channels
-        if measure_coloc and cent.any():
+        if args.measure_coloc and cent.any():
             print('Measuring co-localization...')
             cent[:, 2] -= z_start
             for i in range(n_channels):

@@ -110,4 +110,5 @@ dependencies:
       - threadpoolctl==2.1.0
       - werkzeug==1.0.1
       - zipp==3.1.0
+      - pandas==1.1.5
 prefix: /home/schwitalla/miniconda3/envs/3dunet
