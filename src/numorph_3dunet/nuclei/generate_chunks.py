@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--pred_threshold', default=0.5 ,metavar='pred_threshold', type=float, nargs='?',
                         help='Prediction threshold. Default is 0.5')
     parser.add_argument('--int_threshold', default=200 , metavar='int_threshold', type=float, nargs='?',
-                        help='Minimum intensity of positive cells. Default is 400')
+                        help='Minimum intensity of positive cells. Default is 200')
     parser.add_argument('--normalize_intensity', default=True, metavar='normalize_intensity', type=bool, nargs='?',
                         help='Whether to normalize intensities using min/max. Default is true')
     parser.add_argument('--resample_chunks', default=False, metavar='resample_chunks', type=bool, nargs='?',
